@@ -51,7 +51,7 @@ export interface ReportResponse {
 }
 
 export interface WebSocketMessage {
-  type: 'query' | 'stream' | 'status' | 'error' | 'sources' | 'chunk' | 'end' | 'pong';
+  type: 'query' | 'stream' | 'status' | 'error' | 'sources' | 'chunk' | 'end' | 'pong' | 'connected';
   data?: any;
   message?: string;
 }

@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { type WebSocketMessage } from './api';
+import { type WebSocketMessage } from '../types';
 
 interface WebSocketOptions {
   url?: string;
@@ -21,7 +21,7 @@ export class WebSocketManager {
   private isConnected = false;
 
   constructor(url: string, options: WebSocketOptions = {}) {
-    this.url = url || options.url || (import.meta.env.VITE_WS_URL || 'ws://localhost:8000/api/ws');
+    this.url = url || options.url || (import.meta.env.VITE_WS_URL || 'ws://localhost:8000/api/ws/');
     this.options = {
       reconnect: true,
       reconnectInterval: 5000,

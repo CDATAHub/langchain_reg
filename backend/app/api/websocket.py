@@ -95,6 +95,17 @@ async def websocket_status():
 @router.websocket("/")
 async def websocket_endpoint(websocket: WebSocket):
     """Main WebSocket endpoint for real-time communication"""
+    await handle_websocket_connection(websocket)
+
+
+@router.websocket("")
+async def websocket_endpoint_no_slash(websocket: WebSocket):
+    """WebSocket endpoint without trailing slash"""
+    await handle_websocket_connection(websocket)
+
+
+async def handle_websocket_connection(websocket: WebSocket):
+    """Common WebSocket connection handler"""
     # Generate a unique session ID
     session_id = str(uuid.uuid4())
 
