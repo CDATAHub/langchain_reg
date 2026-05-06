@@ -6,7 +6,12 @@ Sets up the index and loads documents on startup
 """
 
 import os
+import sys
 import asyncio
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).parent))
+
 from app.core.config import settings
 from app.services.llamaindex_service import llamaindex_service
 from app.services.langchain_service import langchain_service

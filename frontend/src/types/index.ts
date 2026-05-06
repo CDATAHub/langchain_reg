@@ -60,6 +60,7 @@ export interface QueryParams {
   question: string;
   stream?: boolean;
   top_k?: number;
+  session_id?: string;
 }
 
 export interface ConnectionStatus {

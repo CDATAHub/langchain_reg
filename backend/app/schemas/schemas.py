@@ -28,6 +28,7 @@ class QueryRequest(BaseModel):
     question: str = Field(..., description="The question to ask")
     stream: bool = Field(default=False, description="Whether to stream the response")
     top_k: int = Field(default=5, description="Number of documents to retrieve")
+    session_id: Optional[str] = Field(default=None, description="Client conversation session id")
 
 
 class SourceDocument(BaseModel):
@@ -42,6 +43,8 @@ class QueryResponse(BaseModel):
     sources: List[SourceDocument]
     confidence: float
     timestamp: datetime
+    trace_id: Optional[str] = None
+    session_id: Optional[str] = None
 
 
 class StreamingChunk(BaseModel):

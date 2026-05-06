@@ -2,6 +2,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import { useStreamingQuery, useDocuments } from '../hooks';
 import { type SourceDocument } from '../services/api';
 import { WebSocketManager } from '../services/websocket';
+import { getOrCreateSessionId } from '../services/api';
 
 const WS_URL = import.meta.env.VITE_WS_URL || 'ws://localhost:8000/api/ws/';
 
@@ -23,7 +24,7 @@ const QueryInterface: React.FC = () => {
     reset: resetQuery,
     executeQuery
   } = useStreamingQuery({
-    onChunk: (chunk) => {
+    onChunk: (_chunk) => {
       // Auto-scroll to bottom
       if (messageContainerRef.current) {
         messageContainerRef.current.scrollTop = messageContainerRef.current.scrollHeight;
@@ -42,6 +43,7 @@ const QueryInterface: React.FC = () => {
   // Initialize WebSocket
   useEffect(() => {
     try {
+      getOrCreateSessionId();
       wsRef.current = new WebSocketManager(WS_URL, {
         onMessage: (message) => {
           console.log('WebSocket message:', message);
@@ -90,23 +92,10 @@ const QueryInterface: React.FC = () => {
     
     resetQuery();
 
-    if (isWebSocketConnected && wsRef.current?.connected) {
-      // Use WebSocket for real-time communication
-      wsRef.current.send({
-        type: 'query',
-        data: {
-          question,
-          stream: true,
-          top_k: topK
-        }
-      });
-    } else {
-      // Use HTTP API
-      try {
-        await executeQuery(question, useStreaming, topK);
-      } catch (error) {
-        console.error('Query failed:', error);
-      }
+    try {
+      await executeQuery(question, useStreaming, topK);
+    } catch (error) {
+      console.error('Query failed:', error);
     }
   };
 

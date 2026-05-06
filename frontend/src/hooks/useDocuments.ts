@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import { documentAPI, type DocumentMetadata, type DocumentList, type UploadResponse } from '../services/api';
 
 export function useDocuments() {

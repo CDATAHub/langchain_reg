@@ -1,24 +1,37 @@
-from fastapi import FastAPI, HTTPException, UploadFile, File, WebSocket, WebSocketDisconnect, Request, Response
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse, JSONResponse
-import uvicorn
-import json
-import os
-from datetime import datetime
-from typing import List, Dict, Any
+from contextlib import asynccontextmanager
 
-# 支持相对导入
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
+from datetime import datetime
+
 import sys
 from pathlib import Path
 sys.path.append(str(Path(__file__).parent))
 
 from api import documents, queries, reports, upload, websocket
-from core.config import settings
+from app.core.config import settings
+from app.core.logging import get_logger
+from app.observability.langfuse_service import langfuse_service
+
+logger = get_logger(__name__)
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    from app.db.connection import setup_database, close_database
+
+    langfuse_service.setup()
+    await setup_database()
+    yield
+    langfuse_service.flush()
+    await close_database()
 
 app = FastAPI(
     title="LangChain + LlamaIndex Insurance Document Q&A",
     description="Web application for insurance document Q&A with streaming support",
-    version="1.0.0"
+    version="1.0.0",
+    lifespan=lifespan,
 )
 
 # Configure CORS with standard middleware
@@ -57,8 +70,14 @@ async def health_check():
 
 
 @app.exception_handler(Exception)
-async def global_exception_handler(request, exc):
+async def global_exception_handler(request: Request, exc: Exception):
     """Global exception handler"""
-    error_msg = f"Internal server error: {str(exc)}"
-    print(f"ERROR: {error_msg}")
-    raise HTTPException(status_code=500, detail=error_msg)
+    logger.exception("Unhandled exception on %s: %s", request.url.path, exc)
+    return JSONResponse(
+        status_code=500,
+        content={
+            "detail": "服务处理异常，已记录日志",
+            "trace_id": langfuse_service.get_current_trace_id(),
+            "timestamp": datetime.now().isoformat(),
+        },
+    )

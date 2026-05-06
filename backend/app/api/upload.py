@@ -5,8 +5,8 @@ import os
 import shutil
 from datetime import datetime
 
-from schemas.schemas import UploadResponse
-from core.config import settings
+from app.schemas.schemas import UploadResponse
+from app.core.config import settings
 
 router = APIRouter()
 

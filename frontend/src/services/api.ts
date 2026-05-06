@@ -13,6 +13,8 @@ export interface QueryResponse {
   sources: SourceDocument[];
   confidence: number;
   timestamp: string;
+  trace_id?: string;
+  session_id?: string;
 }
 
 export interface DocumentMetadata {
@@ -21,6 +23,8 @@ export interface DocumentMetadata {
   uploaded_at: string;
   indexed?: boolean;
   chunks_count?: number;
+  storage_path?: string;
+  last_updated?: string;
 }
 
 export interface DocumentList {
@@ -57,6 +61,19 @@ export interface QueryParams {
   question: string;
   stream?: boolean;
   top_k?: number;
+  session_id?: string;
+}
+
+export function getOrCreateSessionId(): string {
+  const storageKey = 'rag_session_id';
+  const existing = window.localStorage.getItem(storageKey);
+  if (existing) {
+    return existing;
+  }
+
+  const created = `sess_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
+  window.localStorage.setItem(storageKey, created);
+  return created;
 }
 
 const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
@@ -112,17 +129,30 @@ export const documentAPI = {
 // Query API
 export const queryAPI = {
   async queryDocuments(params: QueryParams): Promise<QueryResponse> {
-    const response = await api.post<QueryResponse>('/api/queries/', params);
+    const sessionId = params.session_id || getOrCreateSessionId();
+    const response = await api.post<QueryResponse>('/api/queries/', {
+      ...params,
+      session_id: sessionId,
+    }, {
+      headers: {
+        'X-Session-Id': sessionId,
+      },
+    });
     return response.data;
   },
 
   async streamQuery(params: QueryParams): Promise<Response> {
+    const sessionId = params.session_id || getOrCreateSessionId();
     const response = await fetch(`${API_BASE_URL}/api/queries/stream`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
+        'X-Session-Id': sessionId,
       },
-      body: JSON.stringify(params),
+      body: JSON.stringify({
+        ...params,
+        session_id: sessionId,
+      }),
     });
     return response;
   },

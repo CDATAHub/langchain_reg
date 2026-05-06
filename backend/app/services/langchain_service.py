@@ -12,7 +12,10 @@ from langchain_core.tools import tool
 from langchain_core.runnables import RunnablePassthrough
 from langchain_core.output_parsers import JsonOutputParser
 
-from core.config import settings
+from app.core.config import settings
+from app.core.logging import get_logger
+
+logger = get_logger(__name__)
 
 
 class LangChainService:
@@ -23,7 +26,7 @@ class LangChainService:
 
     async def setup(self):
         """Initialize LangChain with LLM"""
-        print("[LangChain] Initializing...")
+        logger.info("[LangChain] Initializing...")
         self.llm = ChatTongyi(
             model_name=settings.LLM_MODEL,
             dashscope_api_key=settings.DASHSCOPE_API_KEY,
@@ -31,7 +34,7 @@ class LangChainService:
         )
         self.qa_chain = await self._create_qa_chain()
         self.report_chain = await self._create_report_chain()
-        print("[LangChain] Initialized successfully")
+        logger.info("[LangChain] Initialized successfully")
         return self.llm
 
     async def _create_qa_chain(self):
@@ -68,7 +71,8 @@ class LangChainService:
         self,
         question: str,
         context: str,
-        stream: bool = False
+        stream: bool = False,
+        callback_handler: Any = None,
     ) -> str:
         """Answer a question with the given context"""
         if not self.qa_chain:
@@ -76,26 +80,34 @@ class LangChainService:
 
         try:
             if stream:
-                # For streaming, we'll use a streaming callback
+                config = {"callbacks": [callback_handler]} if callback_handler else None
                 result = await asyncio.to_thread(
                     self.qa_chain.invoke,
-                    {"context": context, "question": question}
+                    {"context": context, "question": question},
+                    config,
                 )
                 return result
             else:
-                result = await asyncio.to_thread(
-                    self.qa_chain.invoke,
-                    {"context": context, "question": question}
-                )
+                if callback_handler:
+                    result = await self.qa_chain.ainvoke(
+                        {"context": context, "question": question},
+                        config={"callbacks": [callback_handler]},
+                    )
+                else:
+                    result = await asyncio.to_thread(
+                        self.qa_chain.invoke,
+                        {"context": context, "question": question}
+                    )
                 return result
         except Exception as e:
-            print(f"[LangChain] Error answering question: {e}")
+            logger.exception("[LangChain] Error answering question: %s", e)
             return f"抱歉,回答问题时出错: {str(e)}"
 
     async def stream_answer(
         self,
         question: str,
-        context: str
+        context: str,
+        callback_handler: Any = None,
     ) -> AsyncGenerator[str, None]:
         """Stream answer to a question with the given context"""
         if not self.qa_chain:
@@ -103,13 +115,15 @@ class LangChainService:
 
         try:
             # Use streaming with invoke_async
+            config = {"callbacks": [callback_handler]} if callback_handler else None
             async for chunk in self.qa_chain.astream(
-                {"context": context, "question": question}
+                {"context": context, "question": question},
+                config=config,
             ):
                 if isinstance(chunk, str):
                     yield chunk
         except Exception as e:
-            print(f"[LangChain] Error streaming answer: {e}")
+            logger.exception("[LangChain] Error streaming answer: %s", e)
             yield f"抱歉,流式回答时出错: {str(e)}"
 
     async def generate_report(
@@ -137,7 +151,7 @@ class LangChainService:
 
             return result
         except Exception as e:
-            print(f"[LangChain] Error generating report: {e}")
+            logger.exception("[LangChain] Error generating report: %s", e)
             return f"抱歉,生成报告时出错: {str(e)}"
 
     @tool
@@ -156,10 +170,10 @@ class LangChainService:
 
             await asyncio.to_thread(write_file)
 
-            print(f"[LangChain] Report saved to {filepath}")
+            logger.info("[LangChain] Report saved to %s", filepath)
             return f"报告已保存到 {filepath}"
         except Exception as e:
-            print(f"[LangChain] Error saving report: {e}")
+            logger.exception("[LangChain] Error saving report: %s", e)
             return f"保存报告失败: {str(e)}"
 
     @tool
@@ -175,17 +189,18 @@ class LangChainService:
             timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
             # Log the email details
-            print(f"\n--- 模拟发送邮件 ---")
-            print(f"  收件人: {recipient}")
-            print(f"  主题:   {subject}")
-            print(f"  时间:   {timestamp}")
-            print(f"  正文长度: {len(content)} 字")
-            print(f"--- 邮件发送成功 ---\n")
+            logger.info(
+                "模拟发送邮件 recipient=%s subject=%s timestamp=%s content_length=%s",
+                recipient,
+                subject,
+                timestamp,
+                len(content),
+            )
 
             return f"邮件已于 {timestamp} 成功发送至 {recipient},主题: {subject}"
 
         except Exception as e:
-            print(f"[LangChain] Error sending email: {e}")
+            logger.exception("[LangChain] Error sending email: %s", e)
             return f"发送邮件失败: {str(e)}"
 
     async def process_report_workflow(

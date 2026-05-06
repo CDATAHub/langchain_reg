@@ -40,3 +40,8 @@ httpx>=0.24.0
 
 # Monitoring
 prometheus-client>=0.17.0
+langfuse>=2.60.2
+
+# Database
+sqlalchemy>=2.0.0
+asyncmy>=0.2.9

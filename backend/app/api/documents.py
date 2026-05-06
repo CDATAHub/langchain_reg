@@ -4,9 +4,9 @@ import os
 import shutil
 from datetime import datetime
 
-from schemas.schemas import DocumentList, DocumentResponse, DocumentMetadata
-from services.llamaindex_service import llamaindex_service
-from core.config import settings
+from app.schemas.schemas import DocumentList, DocumentResponse, DocumentMetadata
+from app.services.llamaindex_service import llamaindex_service
+from app.core.config import settings
 
 router = APIRouter()
 

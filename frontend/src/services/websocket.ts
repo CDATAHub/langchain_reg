@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { type WebSocketMessage } from '../types';
 
 interface WebSocketOptions {
@@ -21,7 +21,9 @@ export class WebSocketManager {
   private isConnected = false;
 
   constructor(url: string, options: WebSocketOptions = {}) {
-    this.url = url || options.url || (import.meta.env.VITE_WS_URL || 'ws://localhost:8000/api/ws/');
+    const baseUrl = url || options.url || (import.meta.env.VITE_WS_URL || 'ws://localhost:8000/api/ws/');
+    const sessionId = window.localStorage.getItem('rag_session_id');
+    this.url = sessionId ? `${baseUrl}${baseUrl.includes('?') ? '&' : '?'}session_id=${encodeURIComponent(sessionId)}` : baseUrl;
     this.options = {
       reconnect: true,
       reconnectInterval: 5000,

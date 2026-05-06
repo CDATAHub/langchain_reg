@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { reportAPI, documentAPI, type ReportRequest, type ReportResponse } from '../services/api';
+import { useState, useEffect } from 'react';
+import { reportAPI, type ReportRequest } from '../services/api';
 
 const ReportGenerator: React.FC = () => {
   const [formData, setFormData] = useState<ReportRequest>({
@@ -11,14 +11,13 @@ const ReportGenerator: React.FC = () => {
     email_recipient: ''
   });
   const [reports, setReports] = useState<any[]>([]);
-  const [loading, setLoading] = useState(false);
   const [generatingReport, setGeneratingReport] = useState(false);
   const [downloadingReport, setDownloadingReport] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
 
   // Load reports on component mount
-  React.useEffect(() => {
+  useEffect(() => {
     loadReports();
   }, []);
 

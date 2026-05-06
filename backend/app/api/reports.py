@@ -3,10 +3,10 @@ from typing import List, Optional
 import uuid
 from datetime import datetime
 
-from schemas.schemas import ReportRequest, ReportResponse, SourceDocument
-from services.llamaindex_service import llamaindex_service
-from services.langchain_service import langchain_service
-from core.config import settings
+from app.schemas.schemas import ReportRequest, ReportResponse, SourceDocument
+from app.services.llamaindex_service import llamaindex_service
+from app.services.langchain_service import langchain_service
+from app.core.config import settings
 
 router = APIRouter()
 

@@ -19,6 +19,34 @@ class Settings(BaseSettings):
     # API Keys
     DASHSCOPE_API_KEY: str
 
+    # Auth settings
+    AUTH_REQUIRED: bool = False
+    JWT_SECRET_KEY: str = ""
+    JWT_ALGORITHM: str = "HS256"
+    JWT_ISSUER: str = ""
+    JWT_AUDIENCE: str = ""
+    DEFAULT_TENANT_ID: str = "public"
+    DEFAULT_USER_ID: str = "anonymous"
+
+    # Langfuse settings
+    LANGFUSE_ENABLED: bool = False
+    LANGFUSE_HOST: str = ""
+    LANGFUSE_PUBLIC_KEY: str = ""
+    LANGFUSE_SECRET_KEY: str = ""
+    LANGFUSE_RELEASE: str = ""
+    LANGFUSE_TIMEOUT: int = 10
+    LANGFUSE_ENV: str = "dev"
+
+    # RAG metadata settings
+    BIZ_SCENARIO: str = "policy_inquiry"
+    PROMPT_VERSION: str = "v1"
+
+    # Database settings
+    MYSQL_DSN: str = ""
+
+    # Multi-tenant retrieval settings
+    MILVUS_TENANT_MODE: str = "metadata"
+
     # Storage settings
     STORAGE_DIR: str = "./combined_storage"
     UPLOAD_DIR: str = "./uploads"

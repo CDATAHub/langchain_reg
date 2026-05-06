@@ -1,52 +1,44 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 import json
 import asyncio
 from typing import List, Dict, Any, Optional, AsyncGenerator
 from datetime import datetime
 
-from schemas.schemas import QueryRequest, QueryResponse, StreamingChunk, SourceDocument
-from services.llamaindex_service import llamaindex_service
-from services.langchain_service import langchain_service
-from core.config import settings
+from app.auth.dependencies import get_current_user_context
+from app.auth.models import UserContext
+from app.schemas.schemas import QueryRequest, QueryResponse, StreamingChunk, SourceDocument
+from app.services.llamaindex_service import llamaindex_service
+from app.services.langchain_service import langchain_service
+from app.services.rag_pipeline_service import run_rag_pipeline
+from app.core.config import settings
 
 router = APIRouter()
 
 
+def _sse_event(payload: Dict[str, Any]) -> str:
+    return f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
+
+
 @router.post("/", response_model=QueryResponse)
-async def query_documents(request: QueryRequest):
+async def query_documents(
+    request: QueryRequest,
+    user_context: UserContext = Depends(get_current_user_context),
+):
     """Perform a query on indexed documents"""
     try:
-        # Step 1: Retrieve relevant documents using LlamaIndex
-        sources = await llamaindex_service.query(
-            query_text=request.question,
-            top_k=request.top_k
-        )
+        if request.session_id:
+            user_context = user_context.model_copy(update={"session_id": request.session_id})
 
-        if not sources:
-            return QueryResponse(
-                answer="抱歉，没有找到与您的问题相关的文档。",
-                sources=[],
-                confidence=0.0,
-                timestamp=datetime.now()
-            )
-
-        # Step 2: Prepare context for LangChain
-        context = "\n\n".join(
-            f"[来源: {source['metadata']['file_name']}]\n{source['content']}"
-            for source in sources
-        )
-
-        # Step 3: Generate answer using LangChain
-        answer = await langchain_service.answer_question(
+        result = await run_rag_pipeline(
             question=request.question,
-            context=context,
-            stream=False  # For non-streaming response
+            user_context=user_context,
+            top_k=request.top_k
         )
 
         # Convert sources to SourceDocument format
         source_docs = []
-        for source in sources:
+        for source in result["sources"]:
             source_docs.append(SourceDocument(
                 content=source["content"],
                 file_name=source["metadata"]["file_name"],
@@ -54,14 +46,13 @@ async def query_documents(request: QueryRequest):
                 page_number=source["metadata"].get("page_label")
             ))
 
-        # Calculate confidence score (simplified)
-        confidence = len(answer) / (len(context) + 1) if context else 0.5
-
         return QueryResponse(
-            answer=answer,
+            answer=result["answer"],
             sources=source_docs,
-            confidence=min(confidence, 1.0),
-            timestamp=datetime.now()
+            confidence=result["confidence"],
+            timestamp=datetime.now(),
+            trace_id=result.get("trace_id"),
+            session_id=user_context.session_id,
         )
 
     except Exception as e:
@@ -69,19 +60,27 @@ async def query_documents(request: QueryRequest):
 
 
 @router.post("/stream")
-async def query_stream(request: QueryRequest):
+async def query_stream(
+    request: QueryRequest,
+    user_context: UserContext = Depends(get_current_user_context),
+):
     """Perform a streaming query on indexed documents"""
     try:
+        if request.session_id:
+            user_context = user_context.model_copy(update={"session_id": request.session_id})
+
         # Step 1: Retrieve relevant documents
         sources = await llamaindex_service.query(
             query_text=request.question,
-            top_k=request.top_k
+            top_k=request.top_k,
+            tenant_id=user_context.tenant_id,
+            callback_handler=None,
         )
 
         if not sources:
             # Return empty stream if no sources found
             async def empty_stream():
-                yield json.dumps({
+                yield _sse_event({
                     "type": "error",
                     "message": "没有找到相关文档"
                 })
@@ -105,7 +104,7 @@ async def query_stream(request: QueryRequest):
                     page_number=source["metadata"].get("page_label")
                 ))
 
-            yield json.dumps({
+            yield _sse_event({
                 "type": "sources",
                 "data": [doc.dict() for doc in source_docs]
             })
@@ -113,19 +112,21 @@ async def query_stream(request: QueryRequest):
             # Stream the answer
             async for chunk in langchain_service.stream_answer(
                 question=request.question,
-                context=context
+                context=context,
+                callback_handler=None,
             ):
-                yield json.dumps({
+                yield _sse_event({
                     "type": "chunk",
                     "content": chunk,
                     "done": False
                 })
 
             # Send end signal
-            yield json.dumps({
+            yield _sse_event({
                 "type": "end",
                 "content": "",
-                "done": True
+                "done": True,
+                "session_id": user_context.session_id,
             })
 
         return StreamingResponse(
@@ -135,7 +136,7 @@ async def query_stream(request: QueryRequest):
 
     except Exception as e:
         async def error_stream():
-            yield json.dumps({
+            yield _sse_event({
                 "type": "error",
                 "message": f"Error processing query: {str(e)}"
             })

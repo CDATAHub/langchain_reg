@@ -19,8 +19,13 @@ from llama_index.embeddings.dashscope import (
     DashScopeTextEmbeddingModels,
 )
 from llama_index.core.node_parser import SentenceSplitter
+from llama_index.core.vector_stores import MetadataFilters, ExactMatchFilter
+from llama_index.core.callbacks import CallbackManager
 
-from core.config import settings
+from app.core.config import settings
+from app.core.logging import get_logger
+
+logger = get_logger(__name__)
 
 
 class LlamaIndexService:
@@ -32,7 +37,7 @@ class LlamaIndexService:
 
     async def setup(self):
         """Initialize LlamaIndex with LLM and Embedding settings"""
-        print("[LlamaIndex] Initializing...")
+        logger.info("[LlamaIndex] Initializing...")
         self.llm = DashScope(
             model=settings.LLM_MODEL,
             api_key=settings.DASHSCOPE_API_KEY,
@@ -53,25 +58,25 @@ class LlamaIndexService:
             chunk_overlap=settings.CHUNK_OVERLAP
         )
 
-        print("[LlamaIndex] Initialized successfully")
+        logger.info("[LlamaIndex] Initialized successfully")
         return self.llm, self.embed_model
 
     async def load_documents(self, directory: str) -> List[LlamaDocument]:
         """Load documents from a directory"""
-        print(f"[LlamaIndex] Loading documents from {directory}")
+        logger.info("[LlamaIndex] Loading documents from %s", directory)
 
         if not os.path.exists(directory):
-            print(f"[LlamaIndex] Directory {directory} does not exist")
+            logger.info("[LlamaIndex] Directory %s does not exist", directory)
             return []
 
         try:
             reader = SimpleDirectoryReader(directory)
             documents = await asyncio.to_thread(reader.load_data)
             self.documents = documents
-            print(f"[LlamaIndex] Loaded {len(documents)} documents")
+            logger.info("[LlamaIndex] Loaded %s documents", len(documents))
             return documents
         except Exception as e:
-            print(f"[LlamaIndex] Error loading documents: {e}")
+            logger.exception("[LlamaIndex] Error loading documents: %s", e)
             return []
 
     async def build_index(self, documents: Optional[List[LlamaDocument]] = None) -> BaseIndex:
@@ -83,34 +88,49 @@ class LlamaIndexService:
             try:
                 storage_context = StorageContext.from_defaults(persist_dir=settings.STORAGE_DIR)
                 self.index = await asyncio.to_thread(load_index_from_storage, storage_context)
-                print(f"[LlamaIndex] Loaded existing index from {settings.STORAGE_DIR}")
+                logger.info("[LlamaIndex] Loaded existing index from %s", settings.STORAGE_DIR)
                 return self.index
             except Exception as e:
-                print(f"[LlamaIndex] Could not load existing index: {e}")
+                logger.warning("[LlamaIndex] Could not load existing index: %s", e)
 
         if not docs_to_index:
-            print("[LlamaIndex] No documents to index")
+            logger.info("[LlamaIndex] No documents to index")
             return None
 
         # Build new index
-        print(f"[LlamaIndex] Building index from {len(docs_to_index)} documents...")
+        logger.info("[LlamaIndex] Building index from %s documents...", len(docs_to_index))
         self.index = await asyncio.to_thread(VectorStoreIndex.from_documents, docs_to_index)
 
         # Persist index
         os.makedirs(settings.STORAGE_DIR, exist_ok=True)
         self.index.storage_context.persist(persist_dir=settings.STORAGE_DIR)
-        print(f"[LlamaIndex] Index built and persisted to {settings.STORAGE_DIR}")
+        logger.info("[LlamaIndex] Index built and persisted to %s", settings.STORAGE_DIR)
 
         return self.index
 
-    async def query(self, query_text: str, top_k: int = 5) -> List[Dict[str, Any]]:
+    async def query(
+        self,
+        query_text: str,
+        top_k: int = 5,
+        tenant_id: Optional[str] = None,
+        callback_handler: Any = None,
+    ) -> List[Dict[str, Any]]:
         """Retrieve relevant documents using similarity search"""
         if not self.index:
-            print("[LlamaIndex] No index available for querying")
+            logger.warning("[LlamaIndex] No index available for querying")
             return []
 
         try:
-            retriever = self.index.as_retriever(similarity_top_k=top_k)
+            if callback_handler is not None:
+                Settings.callback_manager = CallbackManager([callback_handler])
+
+            retriever_kwargs: Dict[str, Any] = {"similarity_top_k": top_k}
+            if tenant_id:
+                retriever_kwargs["filters"] = MetadataFilters(
+                    filters=[ExactMatchFilter(key="tenant_id", value=tenant_id)]
+                )
+
+            retriever = self.index.as_retriever(**retriever_kwargs)
             nodes = await asyncio.to_thread(retriever.retrieve, query_text)
 
             results = []
@@ -124,11 +144,11 @@ class LlamaIndexService:
                     }
                 })
 
-            print(f"[LlamaIndex] Retrieved {len(results)} documents for query")
+            logger.info("[LlamaIndex] Retrieved %s documents for query", len(results))
             return results
 
         except Exception as e:
-            print(f"[LlamaIndex] Error during query: {e}")
+            logger.exception("[LlamaIndex] Error during query: %s", e)
             return []
 
     async def add_document(self, file_path: str, file_name: str) -> bool:
@@ -146,6 +166,7 @@ class LlamaIndexService:
             for doc in documents:
                 doc.metadata["file_name"] = file_name
                 doc.metadata["uploaded_at"] = datetime.now().isoformat()
+                doc.metadata.setdefault("tenant_id", settings.DEFAULT_TENANT_ID)
 
             # Insert into index
             if self.index:
@@ -154,14 +175,14 @@ class LlamaIndexService:
 
                 # Persist updated index
                 self.index.storage_context.persist(persist_dir=settings.STORAGE_DIR)
-                print(f"[LlamaIndex] Document {file_name} added to index")
+                logger.info("[LlamaIndex] Document %s added to index", file_name)
                 return True
             else:
-                print("[LlamaIndex] No index available to add document")
+                logger.warning("[LlamaIndex] No index available to add document")
                 return False
 
         except Exception as e:
-            print(f"[LlamaIndex] Error adding document: {e}")
+            logger.exception("[LlamaIndex] Error adding document: %s", e)
             return False
 
     def get_index_status(self) -> Dict[str, Any]:
@@ -183,12 +204,12 @@ class LlamaIndexService:
             if os.path.exists(settings.STORAGE_DIR):
                 import shutil
                 shutil.rmtree(settings.STORAGE_DIR)
-                print(f"[LlamaIndex] Cleared index and storage at {settings.STORAGE_DIR}")
+                logger.info("[LlamaIndex] Cleared index and storage at %s", settings.STORAGE_DIR)
 
             return True
 
         except Exception as e:
-            print(f"[LlamaIndex] Error clearing index: {e}")
+            logger.exception("[LlamaIndex] Error clearing index: %s", e)
             return False
 
 

@@ -1,5 +1,5 @@
-import React, { useState, useEffect, useCallback } from 'react';
-import { queryAPI, type QueryResponse, type SourceDocument } from '../services/api';
+import { useState, useCallback } from 'react';
+import { getOrCreateSessionId, queryAPI, type QueryResponse, type SourceDocument } from '../services/api';
 
 interface UseStreamingQueryOptions {
   onChunk?: (chunk: string) => void;
@@ -33,11 +33,13 @@ export function useStreamingQuery(options: UseStreamingQueryOptions = {}) {
       setIsStreaming(true);
 
       if (stream) {
+        const sessionId = getOrCreateSessionId();
         // Streaming query
         const response = await queryAPI.streamQuery({
           question,
           stream,
           top_k: topK,
+          session_id: sessionId,
         });
 
         const reader = response.body?.getReader();
@@ -71,7 +73,16 @@ export function useStreamingQuery(options: UseStreamingQueryOptions = {}) {
                   throw new Error(event.message || 'Stream error');
                 } else if (event.type === 'end') {
                   setIsStreaming(false);
-                  options.onComplete?.(completeResponse!);
+                  const finalResponse: QueryResponse = {
+                    answer: '',
+                    sources: event.data || [],
+                    confidence: 0,
+                    timestamp: new Date().toISOString(),
+                    trace_id: event.trace_id,
+                    session_id: event.session_id || sessionId,
+                  };
+                  setCompleteResponse(finalResponse);
+                  options.onComplete?.(finalResponse);
                 }
               } catch (e) {
                 console.error('Error parsing SSE:', e);
@@ -85,6 +96,7 @@ export function useStreamingQuery(options: UseStreamingQueryOptions = {}) {
           question,
           stream,
           top_k: topK,
+          session_id: getOrCreateSessionId(),
         });
 
         setCompleteResponse(response);

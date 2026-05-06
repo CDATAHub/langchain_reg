@@ -1,12 +1,12 @@
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
-from typing import Dict, Set, Optional
+from typing import Dict, Optional
 import json
 import uuid
 from datetime import datetime
 
-from services.llamaindex_service import llamaindex_service
-from services.langchain_service import langchain_service
-from core.config import settings
+from app.auth.models import UserContext
+from app.core.config import settings
+from app.services.rag_pipeline_service import run_rag_pipeline
 
 router = APIRouter()
 
@@ -17,14 +17,17 @@ class ConnectionManager:
         self.active_connections: Dict[str, WebSocket] = {}
         self.connection_metadata: Dict[str, Dict] = {}
 
-    async def connect(self, websocket: WebSocket, session_id: str):
+    async def connect(self, websocket: WebSocket, session_id: str, user_context: UserContext):
         """Accept a new WebSocket connection"""
         await websocket.accept()
         self.active_connections[session_id] = websocket
         self.connection_metadata[session_id] = {
             "connected_at": datetime.now().isoformat(),
             "last_activity": datetime.now().isoformat(),
-            "query_count": 0
+            "query_count": 0,
+            "user_id": user_context.user_id,
+            "tenant_id": user_context.tenant_id,
+            "channel": user_context.channel,
         }
 
         # Send welcome message
@@ -106,11 +109,17 @@ async def websocket_endpoint_no_slash(websocket: WebSocket):
 
 async def handle_websocket_connection(websocket: WebSocket):
     """Common WebSocket connection handler"""
-    # Generate a unique session ID
-    session_id = str(uuid.uuid4())
+    session_id = websocket.headers.get("x-session-id") or websocket.query_params.get("session_id") or str(uuid.uuid4())
+    user_context = UserContext(
+        user_id=settings.DEFAULT_USER_ID,
+        tenant_id=settings.DEFAULT_TENANT_ID,
+        session_id=session_id,
+        ip=websocket.client.host if websocket.client else "unknown",
+        channel=websocket.headers.get("x-channel", "web"),
+    )
 
     # Accept connection
-    await manager.connect(websocket, session_id)
+    await manager.connect(websocket, session_id, user_context)
 
     try:
         while True:
@@ -155,6 +164,15 @@ async def handle_query_request(session_id: str, request: Dict):
         question = query_data.get("question", "")
         top_k = query_data.get("top_k", 5)
         stream = query_data.get("stream", True)
+        request_session_id = query_data.get("session_id") or session_id
+        connection_info = manager.get_connection_info(session_id) or {}
+        user_context = UserContext(
+            user_id=connection_info.get("user_id", settings.DEFAULT_USER_ID),
+            tenant_id=connection_info.get("tenant_id", settings.DEFAULT_TENANT_ID),
+            session_id=request_session_id,
+            ip="websocket",
+            channel=connection_info.get("channel", "web"),
+        )
 
         # Update query count
         if session_id in manager.connection_metadata:
@@ -166,11 +184,12 @@ async def handle_query_request(session_id: str, request: Dict):
             "message": "正在检索文档..."
         })
 
-        # Retrieve sources
-        sources = await llamaindex_service.query(
-            query_text=question,
-            top_k=top_k
+        result = await run_rag_pipeline(
+            question=question,
+            user_context=user_context,
+            top_k=top_k,
         )
+        sources = result["sources"]
 
         if not sources:
             await manager.send_message(session_id, {
@@ -180,7 +199,7 @@ async def handle_query_request(session_id: str, request: Dict):
             return
 
         # Send sources
-        from schemas.schemas import SourceDocument
+        from app.schemas.schemas import SourceDocument
         source_docs = []
         for source in sources:
             source_docs.append(SourceDocument(
@@ -207,31 +226,26 @@ async def handle_query_request(session_id: str, request: Dict):
         )
 
         if stream:
-            # Stream the answer
-            async for chunk in langchain_service.stream_answer(
-                question=question,
-                context=context
-            ):
-                await manager.send_message(session_id, {
-                    "type": "chunk",
-                    "content": chunk
-                })
-        else:
-            # Get complete answer
-            answer = await langchain_service.answer_question(
-                question=question,
-                context=context,
-                stream=False
-            )
             await manager.send_message(session_id, {
                 "type": "answer",
-                "content": answer
+                "content": result["answer"],
+                "trace_id": result.get("trace_id"),
+                "session_id": user_context.session_id,
+            })
+        else:
+            await manager.send_message(session_id, {
+                "type": "answer",
+                "content": result["answer"],
+                "trace_id": result.get("trace_id"),
+                "session_id": user_context.session_id,
             })
 
         # Send end signal
         await manager.send_message(session_id, {
             "type": "end",
-            "content": ""
+            "content": "",
+            "trace_id": result.get("trace_id"),
+            "session_id": user_context.session_id,
         })
 
     except Exception as e:

@@ -140,3 +140,7 @@ cython_debug/
 /venv1/
 .idea
 node_modules/
+backend/combined_storage/
+backend/uploads/
+backend/reports/
+.monkeycode/
